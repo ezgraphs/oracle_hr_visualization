@@ -1,0 +1,312 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title>Spacetree - SpaceTree with on-demand nodes</title>
+<%
+#  params['str']='{ name:\"Steven King\",id:\"node100\",  children:[],  data:{}}'
+#  params['str']='{ name:\"0.2\",        id:\"node02\", children:[],  data:{}}'
+
+%>
+<!-- CSS Files -->
+<link type="text/css" href="../css/base.css" rel="stylesheet" />
+<link type="text/css" href="../css/Spacetree.css" rel="stylesheet" />
+
+<!--[if IE]><script language="javascript" type="text/javascript" src="../../Extras/excanvas.js"></script><![endif]-->
+
+<!-- JIT Library File -->
+<script language="javascript" type="text/javascript" src="../../jit.js"></script>
+
+<!-- Example File -->
+<script language="javascript" type="text/javascript">
+
+var Log = {
+    elem: false,
+    write: function(text){
+        if (!this.elem) 
+            this.elem = document.getElementById('log');
+        this.elem.innerHTML = text;
+        this.elem.style.left = (500 - this.elem.offsetWidth / 2) + 'px';
+    }
+};
+
+function addEvent(obj, type, fn) {
+    if (obj.addEventListener) obj.addEventListener(type, fn, false);
+    else obj.attachEvent('on' + type, fn);
+};
+
+
+function init(){
+    //init data
+    var json = "<%= params['str'] %>";
+    //end
+    
+    //A client-side tree generator
+    var getTree = (function() {
+        var i = 0;
+        return function(nodeId, level) {
+          var subtree = eval('(' + json.replace(/id:\"([a-zA-Z0-9]+)\"/g, 
+          function(all, match) {
+            return "id:\"" + match + "_" + i + "\""  
+          }) + ')');
+          TreeUtil.prune(subtree, level); i++;
+          return {
+              'id': nodeId,
+              'children': subtree.children
+          };
+        };
+    })();
+    
+    var infovis = document.getElementById('infovis');
+    var w = infovis.offsetWidth, h = infovis.offsetHeight;
+    //init canvas
+    //Create a new canvas instance.
+    var canvas = new Canvas('mycanvas', {
+        'injectInto': 'infovis',
+        'width': w,
+        'height': h,
+        'backgroundColor': '#1a1a1a'
+    });
+    //end
+    
+    
+    //Implement a node rendering function called 'nodeline' that plots a straight line
+    //when contracting or expanding a subtree.
+    ST.Plot.NodeTypes.implement({
+        'nodeline': function(node, canvas, animating) {
+            if(animating === 'expand' || animating === 'contract') {
+                var pos = node.pos.getc(true), nconfig = this.node, data = node.data;
+                var width  = nconfig.width, height = nconfig.height;
+                var algnPos = this.getAlignedPos(pos, width, height);
+                var ctx = canvas.getCtx(), ort = this.config.orientation;
+                ctx.beginPath();
+                if(ort == 'left' || ort == 'right') {
+                    ctx.moveTo(algnPos.x, algnPos.y + height / 2);
+                    ctx.lineTo(algnPos.x + width, algnPos.y + height / 2);
+                } else {
+                    ctx.moveTo(algnPos.x + width / 2, algnPos.y);
+                    ctx.lineTo(algnPos.x + width / 2, algnPos.y + height);
+                }
+                ctx.stroke();
+            } 
+        }
+    });
+
+    //init st
+    //Create a new ST instance
+    var st = new ST(canvas, {
+        //set duration for the animation
+        duration: 800,
+        //set animation transition type
+        transition: Trans.Quart.easeInOut,
+        //set distance between node and its children
+        levelDistance: 50,
+        //set max levels to show. Useful when used with
+        //the request method for requesting trees of specific depth
+        levelsToShow: 2,
+        //set node and edge styles
+        //set overridable=true for styling individual
+        //nodes or edges
+        Node: {
+            height: 20,
+            width: 40,
+            //use a custom
+            //node rendering function
+            type: 'nodeline',
+            color:'#23A4FF',
+            lineWidth: 2,
+            align:"center",
+            overridable: true
+        },
+        
+        Edge: {
+            type: 'bezier',
+            lineWidth: 2,
+            color:'#23A4FF',
+            overridable: true
+        },
+        
+        //Add a request method for requesting on-demand json trees. 
+        //This method gets called when a node
+        //is clicked and its subtree has a smaller depth
+        //than the one specified by the levelsToShow parameter.
+        //In that case a subtree is requested and is added to the dataset.
+        //This method is asynchronous, so you can make an Ajax request for that
+        //subtree and then handle it to the onComplete callback.
+        //Here we just use a client-side tree generator (the getTree function).
+        request: function(nodeId, level, onComplete) {
+          var ans = getTree(nodeId, level);
+          onComplete.onComplete(nodeId, ans);  
+        },
+        
+        onBeforeCompute: function(node){
+            Log.write("loading " + node.name);
+        },
+        
+        onAfterCompute: function(){
+            Log.write("done");
+        },
+        
+        //This method is called on DOM label creation.
+        //Use this method to add event handlers and styles to
+        //your node.
+        onCreateLabel: function(label, node){
+            label.id = node.id;            
+            label.innerHTML = node.name;
+            label.onclick = function(){
+                st.onClick(node.id);
+            };
+            //set label styles
+            var style = label.style;
+            style.width = 40 + 'px';
+            style.height = 17 + 'px';            
+            style.cursor = 'pointer';
+            style.color = '#fff';
+            //style.backgroundColor = '#1a1a1a';
+            style.fontSize = '0.8em';
+            style.textAlign= 'center';
+            style.textDecoration = 'underline';
+            style.paddingTop = '3px';
+        },
+        
+        //This method is called right before plotting
+        //a node. It's useful for changing an individual node
+        //style properties before plotting it.
+        //The data properties prefixed with a dollar
+        //sign will override the global node style properties.
+        onBeforePlotNode: function(node){
+            //add some color to the nodes in the path between the
+            //root node and the selected node.
+            if (node.selected) {
+                node.data.$color = "#ff7";
+            }
+            else {
+                delete node.data.$color;
+            }
+        },
+        
+        //This method is called right before plotting
+        //an edge. It's useful for changing an individual edge
+        //style properties before plotting it.
+        //Edge data proprties prefixed with a dollar sign will
+        //override the Edge global style properties.
+        onBeforePlotLine: function(adj){
+            if (adj.nodeFrom.selected && adj.nodeTo.selected) {
+                adj.data.$color = "#eed";
+                adj.data.$lineWidth = 3;
+            }
+            else {
+                delete adj.data.$color;
+                delete adj.data.$lineWidth;
+            }
+        }
+    });
+    //load json data
+    st.loadJSON(eval( '(' + json + ')' ));
+    //compute node positions and layout
+    st.compute();
+    //emulate a click on the root node.
+    st.onClick(st.root);
+    //end
+    //Add event handlers to switch spacetree orientation.
+   function get(id) {
+      return document.getElementById(id);  
+    };
+
+    var top = get('r-top'), 
+    left = get('r-left'), 
+    bottom = get('r-bottom'), 
+    right = get('r-right');
+    
+    function changeHandler() {
+        if(this.checked) {
+            top.disabled = bottom.disabled = right.disabled = left.disabled = true;
+            st.switchPosition(this.value, "animate", {
+                onComplete: function(){
+                    top.disabled = bottom.disabled = right.disabled = left.disabled = false;
+                }
+            });
+        }
+    };
+    
+    top.onchange = left.onchange = bottom.onchange = right.onchange = changeHandler;
+    //end
+
+}
+
+
+</script>
+</head>
+
+<body onload="init();">
+<div id="container">
+
+<div id="left-container">
+
+
+
+<div class="text">
+<h4>
+SpaceTree with on-demand nodes    
+</h4> 
+
+            This example shows how you can use the <b>request</b> controller method to create a SpaceTree with <b>on demand</b> nodes<br /><br />
+            The basic JSON Tree structure is cloned and appended on demand on each node to create an <b>infinite large SpaceTree</b><br /><br />
+            You can select the <b>tree orientation</b> by changing the select box in the right column.
+            
+</div>
+
+<div id="id-list"></div>
+
+
+<div style="text-align:center;"><a href="example2.js">See the Example Code</a></div>            
+</div>
+
+<div id="center-container">
+    <div id="infovis"></div>    
+</div>
+
+<div id="right-container">
+
+<h4>Change Tree Orientation</h4>
+<table>
+    <tr>
+        <td>
+            <label for="r-left">left </label>
+        </td>
+        <td>
+            <input type="radio" id="r-left" name="orientation" checked="checked" value="left" />
+        </td>
+    </tr>
+    <tr>
+         <td>
+            <label for="r-top">top </label>
+         </td>
+         <td>
+            <input type="radio" id="r-top" name="orientation" value="top" />
+         </td>
+    <tr>
+         <td>
+            <label for="r-bottom">bottom </label>
+          </td>
+          <td>
+            <input type="radio" id="r-bottom" name="orientation" value="bottom" />
+          </td>
+    </tr>
+    <tr>
+          <td>
+            <label for="r-right">right </label>
+          </td> 
+          <td> 
+           <input type="radio" id="r-right" name="orientation" value="right" />
+          </td>
+    </tr>
+</table>
+
+</div>
+
+<div id="log"></div>
+</div>
+<br/><br/><%= params['str'] %><br/> 
+</body>
+</html>
